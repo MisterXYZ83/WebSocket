@@ -174,6 +174,10 @@ LRESULT WebSocketClient::WSCHandleMessage(UINT msg, WPARAM wparam, LPARAM lparam
 			if (handshake_http) delete handshake_http;
 			handshake_http = 0;
 
+			if (resource_uri) delete resource_uri;
+			if (host) delete host;
+			if (key) delete key;
+
 			//libero il ricevitore per avviare la ricezione
 			mReceiverPause = false;
 
@@ -215,7 +219,7 @@ LRESULT WebSocketClient::WSCHandleMessage(UINT msg, WPARAM wparam, LPARAM lparam
 			}
 
 
-			//libero la memoria
+			//libero la memoria allocata nel thread di ricezione
 			if (recv_data) delete recv_data;
 			recv_data = 0;
 		}
@@ -400,9 +404,9 @@ DWORD WINAPI WebSocketClient::WSCReceiverThread(void *data)
 		{
 			received += recv(tranceiver->TranceiverSocket, receiver_buffer + received, RECV_BUFFER_SIZE, 0);
 
-			printf("MESSAGE: ");
-			for (int k = 0; k < received; k++) printf("%02X ", (unsigned char)receiver_buffer[k]);
-			printf("\r\n\r\n");
+			//printf("MESSAGE: ");
+			//for (int k = 0; k < received; k++) printf("%02X ", (unsigned char)receiver_buffer[k]);
+			//printf("\r\n\r\n");
 
 			if (received == RECV_BUFFER_SIZE)
 			{
@@ -431,9 +435,11 @@ DWORD WINAPI WebSocketClient::WSCReceiverThread(void *data)
 		}
 		else
 		{
-			//errore, invio
+			//errore, invio, dealloco
+			if (receiver_buffer) delete receiver_buffer;
+
 			PostMessage(instance->mMessageWindow, WSC_RECEIVER_ERROR, 0, 0);
-			return 0;
+			return (DWORD)-1;
 		}
 
 	}
@@ -784,9 +790,7 @@ int WebSocketClient::WSCConnect(char *address, int port, char *server_res)
 	if (mLocalTranceiver == NULL) return -1;
 	if (mLocalTranceiver->TranceiverSocket != INVALID_SOCKET) return -1; //gia connesso!
 
-	struct addrinfo *result = NULL,
-		*ptr = NULL,
-		hints;
+	struct addrinfo *result = NULL, *ptr = NULL, hints;
 	
 	int iResult;
 
