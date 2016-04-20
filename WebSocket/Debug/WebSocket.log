@@ -1,0 +1,18 @@
+﻿  websocket_client.cpp
+c:\users\marco\documents\visual studio 2015\projects\websocket\websocket\websocket.h(136): warning C4099: 'WebSocketTranceiver': il nome del tipo che in precedenza utilizzava 'class' ora utilizza 'struct'
+  c:\users\marco\documents\visual studio 2015\projects\websocket\websocket\websocket.h(135): note: vedere la dichiarazione di 'WebSocketTranceiver'
+c:\users\marco\documents\visual studio 2015\projects\websocket\websocket\websocket_client.cpp(144): warning C4244: 'inizializzazione': conversione da 'time_t' a 'int'. Possibile perdita di dati.
+c:\users\marco\documents\visual studio 2015\projects\websocket\websocket\websocket_client.cpp(549): warning C4293: '<<': calcolo shift negativo o troppo grande. Comportamento indefinito
+c:\users\marco\documents\visual studio 2015\projects\websocket\websocket\websocket_client.cpp(550): warning C4293: '<<': calcolo shift negativo o troppo grande. Comportamento indefinito
+c:\users\marco\documents\visual studio 2015\projects\websocket\websocket\websocket_client.cpp(572): warning C4800: 'BYTE': imposto valore booleano 'true' o 'false' (avviso di prestazioni)
+c:\users\marco\documents\visual studio 2015\projects\websocket\websocket\websocket_client.cpp(583): warning C4800: 'BYTE': imposto valore booleano 'true' o 'false' (avviso di prestazioni)
+c:\users\marco\documents\visual studio 2015\projects\websocket\websocket\websocket_client.cpp(706): warning C4244: 'inizializzazione': conversione da 'LONG64' a 'unsigned int'. Possibile perdita di dati.
+c:\users\marco\documents\visual studio 2015\projects\websocket\websocket\websocket_client.cpp(707): warning C4244: 'argomento': conversione da 'LONG64' a 'size_t'. Possibile perdita di dati.
+c:\users\marco\documents\visual studio 2015\projects\websocket\websocket\websocket_client.cpp(752): warning C4244: 'argomento': conversione da 'LONG64' a 'size_t'. Possibile perdita di dati.
+c:\users\marco\documents\visual studio 2015\projects\websocket\websocket\websocket_client.cpp(757): warning C4244: 'inizializzazione': conversione da 'LONG64' a 'int'. Possibile perdita di dati.
+c:\users\marco\documents\visual studio 2015\projects\websocket\websocket\websocket_client.cpp(761): warning C4244: 'argomento': conversione da 'LONG64' a 'int'. Possibile perdita di dati.
+  main.cpp
+c:\users\marco\documents\visual studio 2015\projects\websocket\websocket\websocket.h(136): warning C4099: 'WebSocketTranceiver': il nome del tipo che in precedenza utilizzava 'class' ora utilizza 'struct'
+  c:\users\marco\documents\visual studio 2015\projects\websocket\websocket\websocket.h(135): note: vedere la dichiarazione di 'WebSocketTranceiver'
+  Generazione del codice in corso...
+  WebSocket.vcxproj -> C:\Users\Marco\documents\visual studio 2015\Projects\WebSocket\Debug\WebSocket.exe
