@@ -29,8 +29,8 @@ int  main()
 
 
 	WebSocketClient *client = new WebSocketClient();
-	client->WSCConnect("echo.websocket.org", 80, "");
-
+	//client->WSCConnect("echo.websocket.org", 80, "");
+	client->WSCConnect("127.0.0.1", 50000, "");
 
 
 	/////////////// MESSAGE LOOP

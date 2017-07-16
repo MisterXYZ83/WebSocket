@@ -188,7 +188,7 @@ LRESULT WebSocketClient::WSCHandleMessage(UINT msg, WPARAM wparam, LPARAM lparam
 		}
 		break;
 
-		case WSC_RECEIVER_RECV_DATA:
+		/*case WSC_RECEIVER_RECV_DATA:
 		{
 			char *recv_data = (char *)lparam;
 			int n_bytes = (int)wparam;
@@ -206,6 +206,8 @@ LRESULT WebSocketClient::WSCHandleMessage(UINT msg, WPARAM wparam, LPARAM lparam
 				{
 					//connessione aperta
 					mLocalTranceiver->ConnectionState = Open;
+
+					//verifico se ho dati da parsare subito
 				}
 			}
 			else if (mLocalTranceiver->ConnectionState == Open)
@@ -218,12 +220,167 @@ LRESULT WebSocketClient::WSCHandleMessage(UINT msg, WPARAM wparam, LPARAM lparam
 
 			}
 
-
 			//libero la memoria allocata nel thread di ricezione
+			//il frammento viene copiato internamente
 			if (recv_data) delete recv_data;
 			recv_data = 0;
 		}
-		break;
+		break;*/
+
+		case WSC_RECEIVER_RECV_DATA:
+		{
+			char *recv_data = (char *)lparam;
+			int n_bytes = (int)wparam;
+
+			int offset = 0;
+			int temp_len = 0;
+
+			//elaboro la risposta dal server
+			//accodo il dato ricevuto nel buffer attuale e parso
+			temp_len = mLocalTranceiver->DataBuffer_Size + n_bytes;
+
+			char *tmp_buffer = NULL;
+			
+			if (recv_data)
+			{
+				//nuovi dati, accodo e processo
+				tmp_buffer = (char *)malloc(temp_len);
+				memset(tmp_buffer, 0, temp_len);
+
+				if (mLocalTranceiver->DataBuffer)
+				{
+					//accodo
+					memcpy(tmp_buffer, mLocalTranceiver->DataBuffer, mLocalTranceiver->DataBuffer_Size);
+					memcpy(tmp_buffer + mLocalTranceiver->DataBuffer_Size, recv_data, n_bytes);
+
+					free(mLocalTranceiver->DataBuffer);
+
+				}
+				else
+				{
+					//copio il primo buffer
+					memcpy(tmp_buffer, recv_data, n_bytes);
+				}
+
+				mLocalTranceiver->DataBuffer = tmp_buffer;
+				mLocalTranceiver->DataBuffer_Size = temp_len;
+			}
+			else
+			{
+				//non ho nuovi dati, devo finire a processare i residui
+			}
+
+			//libero memoria del chiamante, se sono dati nuovi (!= null)
+			if (recv_data)
+			{
+				free(recv_data);
+				recv_data = NULL;
+			}
+
+			//valuto i dati
+			//se la connessione non e' stata aperta, analizzo
+			if (mLocalTranceiver->ConnectionState == Opening)
+			{
+				bool valid_handshake = WSCValidateHandshake(mLocalTranceiver->DataBuffer, n_bytes, &offset);
+
+				if (!valid_handshake)
+				{
+					//PostMessage(mMessageWindow, WSC_RECEIVER_FAIL_CONNECTION, 0, 0);
+					//non faccio niente, continuo ad accodare
+					if (mLocalTranceiver->DataBuffer_Size >= HTTP_MAX_HEADER_SIZE)
+					{
+						//troppo grande, libero la memoria
+						free(mLocalTranceiver->DataBuffer);
+						mLocalTranceiver->DataBuffer = 0;
+						mLocalTranceiver->DataBuffer_Size = 0;
+					}
+				}
+				//connessione aperta
+				else
+				{
+					mLocalTranceiver->ConnectionState = Open;
+
+					int residual_data = mLocalTranceiver->DataBuffer_Size - offset;
+
+					//scarto i dati ricevuti fino ad ora e gia processati
+					if (residual_data > 0)
+					{
+						char *tmp_residual_data = (char *)malloc(mLocalTranceiver->DataBuffer_Size - offset);
+
+						memcpy(tmp_residual_data, &mLocalTranceiver->DataBuffer[offset], residual_data);
+
+						free(mLocalTranceiver->DataBuffer);
+						
+						mLocalTranceiver->DataBuffer = tmp_residual_data;
+						mLocalTranceiver->DataBuffer_Size = residual_data;
+
+					}
+					else
+					{
+						//non e' avanzato nulla, posso pulire
+						if ( mLocalTranceiver->DataBuffer ) free(mLocalTranceiver->DataBuffer);
+						mLocalTranceiver->DataBuffer = 0;
+						mLocalTranceiver->DataBuffer_Size = 0;
+					}
+				}
+			}
+			
+			//processo i dati ricevuti
+			if (mLocalTranceiver->ConnectionState == Open)
+			{
+				int status = 0, out_offset = 0;
+				offset = 0;
+
+				WebSocketFrame *frame = NULL;
+
+				do
+				{
+					//decode frame
+					frame = WSCDecodeFrame(&mLocalTranceiver->DataBuffer[offset], mLocalTranceiver->DataBuffer_Size, &out_offset, &status);
+
+					if (frame)
+					{
+						int residual_data = mLocalTranceiver->DataBuffer_Size - out_offset;
+
+						//pulisco tutto il buffer processato
+						if (residual_data > 0)
+						{
+							char *tmp_residual_data = (char *)malloc(mLocalTranceiver->DataBuffer_Size - out_offset);
+
+							memcpy(tmp_residual_data, &mLocalTranceiver->DataBuffer[out_offset], residual_data);
+
+							free(mLocalTranceiver->DataBuffer);
+
+							mLocalTranceiver->DataBuffer = tmp_residual_data;
+							mLocalTranceiver->DataBuffer_Size = residual_data;
+
+						}
+						else
+						{
+							//tutto finito
+							free(mLocalTranceiver->DataBuffer);
+
+							mLocalTranceiver->DataBuffer = NULL;
+							mLocalTranceiver->DataBuffer_Size = 0;
+						}
+
+						//parso il messaggio (control, framed, etc)
+						WSCParseMessage(frame, residual_data);
+
+						offset = 0;
+					}
+					else
+					{
+						//printf("Frame non completo! %d\r\n", offset);
+						break;
+					}
+
+				} while (frame);
+
+			}
+
+		}
+		break; 
 
 		case WSC_RECEIVER_SEND_DATA:
 		{
@@ -243,8 +400,15 @@ LRESULT WebSocketClient::WSCHandleMessage(UINT msg, WPARAM wparam, LPARAM lparam
 		case WSC_RECEIVER_DATA_MESSAGE:
 		{
 			WebSocketFrame *data_frame = (WebSocketFrame *)lparam;
+			int residual = (int)wparam;
 
+			printf("%s\r\n", data_frame->Payload);
 
+			//ci sono altri dati da processare?
+			/*if (residual)
+			{
+				PostMessage(mMessageWindow, WSC_RECEIVER_RECV_DATA, (WPARAM)residual, (LPARAM)0);
+			}*/
 
 			if (data_frame) WebSocketFrame::DeleteWebSocketFrame(data_frame);
 		}
@@ -254,6 +418,7 @@ LRESULT WebSocketClient::WSCHandleMessage(UINT msg, WPARAM wparam, LPARAM lparam
 		{
 			//invio un pong
 			WebSocketFrame *control_frame = (WebSocketFrame *)lparam;
+			int residual = (int)wparam;
 
 			if (control_frame->IsPingFrame())
 			{
@@ -275,6 +440,13 @@ LRESULT WebSocketClient::WSCHandleMessage(UINT msg, WPARAM wparam, LPARAM lparam
 			}
 
 			if (control_frame) WebSocketFrame::DeleteWebSocketFrame(control_frame);
+
+			//ci sono altri dati da processare?
+			/*if (residual)
+			{
+				PostMessage(mMessageWindow, WSC_RECEIVER_RECV_DATA, (WPARAM)residual, (LPARAM)0);
+			}*/
+
 		}
 		break;
 
@@ -290,16 +462,39 @@ LRESULT WebSocketClient::WSCHandleMessage(UINT msg, WPARAM wparam, LPARAM lparam
 
 		}
 		break;
+
+		//gestione frammenti
+		case WSC_RECEIVER_CLOSE_FRAGMENT:
+		{
+			//riunisco il payload
+
+		}
+		break;
+
+		case WSC_RECEIVER_OPEN_FRAGMENT:
+		{
+			//notifico l'apertura
+
+		}
+		break;
+		
+		case WSC_RECEIVER_NEXT_FRAGMENT:
+		{
+			//nuovo frammento, non finale
+
+		}
+		break;
 	}
 	
 	return 0;
 }
 
-bool WebSocketClient::WSCValidateHandshake(char *recv_data, int n_bytes)
+bool WebSocketClient::WSCValidateHandshake(char *recv_data, int n_bytes, int *offset)
 {
 	//devo verificare l'handshake
 	http_parser_settings parser_settings;
 	http_parser parser;
+	int head_len = 0;
 
 	http_parser_settings_init(&parser_settings);
 	http_parser_init(&parser, HTTP_RESPONSE);	//dobbiamo parsare una REQUEST
@@ -315,13 +510,12 @@ bool WebSocketClient::WSCValidateHandshake(char *recv_data, int n_bytes)
 
 	parser.data = (void *)ud;
 
-	http_parser_execute(&parser, &parser_settings, recv_data, n_bytes);
-
+	head_len = http_parser_execute(&parser, &parser_settings, recv_data, n_bytes);
+	
 	//terminato il parsing (parsing sincrono su main thread), struttura handshake riempita
 	//verifico validita' campi
 	delete ud;
 	ud = 0;
-
 
 	// deve ritornare un return code HTTP pari a 101, altrimenti chiudo
 	//deve contenere un campo Upgrade: websocket
@@ -365,6 +559,9 @@ bool WebSocketClient::WSCValidateHandshake(char *recv_data, int n_bytes)
 
 	if (strcmp(encoded_b64_digest, mLocalTranceiver->HandshakeInfos->WebSocketAccept) != 0) return false;
 
+	//calcolo la lunghezza dell'header
+	if (offset) *offset = head_len;
+
 	//tutto ok
 	return true;
 }
@@ -385,6 +582,9 @@ DWORD WINAPI WebSocketClient::WSCReceiverThread(void *data)
 	bool end_rec = false;
 	int n_realloc = 1;
 
+	//FILE *fp = NULL;
+	//fopen_s(&fp, "outputfile.txt", "wb");
+
 	//loop ricezione
 	while (1)
 	{
@@ -393,45 +593,66 @@ DWORD WINAPI WebSocketClient::WSCReceiverThread(void *data)
 		while (instance->mReceiverPause) SleepConditionVariableCS(&instance->mReceiverCondition, &instance->mReceiverLock, INFINITE);
 		LeaveCriticalSection(&instance->mReceiverLock);
 
-
 		//carico dati fino a che ci sono
 		//prealloco il buffer, sara' deallocato dal consumatore!
-		receiver_buffer = new char[RECV_BUFFER_SIZE + 1];
+		receiver_buffer = (char *)malloc(RECV_BUFFER_SIZE + 1);
 		memset(receiver_buffer, 0, RECV_BUFFER_SIZE + 1);
 		received = 0;
 
 		do
 		{
-			received += recv(tranceiver->TranceiverSocket, receiver_buffer + received, RECV_BUFFER_SIZE, 0);
+			int rec_single = recv(tranceiver->TranceiverSocket, receiver_buffer + received, RECV_BUFFER_SIZE, 0);
+			received += rec_single;
 
-			//printf("MESSAGE: ");
-			//for (int k = 0; k < received; k++) printf("%02X ", (unsigned char)receiver_buffer[k]);
-			//printf("\r\n\r\n");
+			//fprintf_s(fp,"**RECV: ");
+			//for (int k = 0; k < received; k++) fprintf_s(fp,"%c", (unsigned char)receiver_buffer[k]);
+			//fprintf_s(fp,"**\r\n");
+			//fflush(fp);
 
 			if (received == RECV_BUFFER_SIZE)
 			{
+				/*printf("\r\nRicevuto Intero: %d\r\n******************************************************\r\n", rec_single);
+				for (int k = 0; k < received; k++) printf("%c", (unsigned char)receiver_buffer[k]);
+				printf("\r\n******************************************************\r\n");*/
+
 				//rialloco il buffer
 				n_realloc++;
 
-				char *tmp_buffer = new char[RECV_BUFFER_SIZE * n_realloc];
+				char *tmp_buffer = (char *)malloc(RECV_BUFFER_SIZE * n_realloc);
 				memset(tmp_buffer, 0, RECV_BUFFER_SIZE * n_realloc);
 
 				//copio tutto
 				memcpy(tmp_buffer, receiver_buffer, received);
 
-				delete receiver_buffer;
+				free(receiver_buffer);
 
 				//scambio buffer;
 				receiver_buffer = tmp_buffer;
 			}
-			else end_rec = true;
+			else
+			{
+				/*printf("\r\nRicevuto Parziale: %d\r\n******************************************************\r\n", rec_single);
+				for (int k = 0; k < received; k++) printf("%c", (unsigned char)receiver_buffer[k]);
+				printf("\r\n******************************************************\r\n");*/
+
+				end_rec = true;
+			}
 
 		} while (!end_rec);
 
 		//raggiunto EOS su socket, verifico condizione
 		if (received > 0)
 		{
-			PostMessage(instance->mMessageWindow, WSC_RECEIVER_RECV_DATA, (WPARAM)received, (LPARAM)receiver_buffer);
+			//creo una copia per il ricevitore
+			char *received_data = (char *)malloc(received);
+			memcpy(received_data, receiver_buffer, received);
+
+			PostMessage(instance->mMessageWindow, WSC_RECEIVER_RECV_DATA, (WPARAM)received, (LPARAM)received_data);
+
+			//posso liberare il buffer
+			if (receiver_buffer) free(receiver_buffer);
+			receiver_buffer = NULL;
+
 		}
 		else
 		{
@@ -519,7 +740,7 @@ WebSocketFrame *WebSocketClient::WSCDecodeFrame(char *data, int size)
 	//decodifica del header websocket
 	WebSocketFrame *frame = NULL;
 
-	if ( data == NULL || size <= 0) return frame;
+	if ( data == NULL || size <= 0 ) return frame;
 
 	int next_byte = 0;
 
@@ -546,7 +767,7 @@ WebSocketFrame *WebSocketClient::WSCDecodeFrame(char *data, int size)
 	else if (payload_len == 126)
 	{
 		//leggo altri 2 byte dal frame
-		total_payload_len = (data[++next_byte] << 0) + (data[++next_byte + 2] << 8);
+		total_payload_len = (data[++next_byte] << 0) + (data[++next_byte] << 8);
 	}
 	else if (payload_len == 127)
 	{
@@ -601,7 +822,156 @@ WebSocketFrame *WebSocketClient::WSCDecodeFrame(char *data, int size)
 	return frame;
 }
 
-bool WebSocketClient::WSCParseMessage(WebSocketFrame *actual_frame)
+//inizio la decodifica di un frame
+WebSocketFrame *WebSocketClient::WSCDecodeFrame(char *data, int size, int *offset, int *status)
+{
+	WebSocketFrame *frame = NULL;
+
+	if (data == NULL || size <= 0) return frame;
+
+	int next_byte = 0;
+
+	if (offset) *offset = 0;
+
+	//parser in linea, scorro i byte finche non trovo un frame intero, 
+	//che ritorno parsato nella struttura WebSocketFrame
+	//altrimenti:
+	//in caso di errore di decodifica, ritorno null e status = -1;
+	//in caso di dati non sufficienti, ritorno null e status = 1;
+	//in caso di dati sufficienti e frame valido ritorno il frame e status = 0;
+	//offset vale sempre 0 tranne quando un frame viene completato indicando la posizione successiva
+
+	//mappa di bit 
+	BYTE fin = (data[next_byte] & 0x80) >> 7;
+	BYTE res1 = (data[next_byte] & 0x40) >> 6;
+	BYTE res2 = (data[next_byte] & 0x20) >> 5;
+	BYTE res3 = (data[next_byte] & 0x10) >> 4;
+	BYTE opcode = (data[next_byte] & 0x0F) >> 0;
+
+	if ( (next_byte + 1) < size ) ++next_byte;
+	else 
+	{
+		if (status) *status = 1; return NULL;
+	}
+	
+	BYTE masked = (data[next_byte] & 0x80) >> 7;
+	BYTE payload_len = (data[next_byte] & 0x7F) >> 0;
+
+	unsigned long total_payload_len = 0;
+
+	//verifico se ho un payload extra
+	if (payload_len < 125)
+	{
+		total_payload_len = payload_len;
+		
+		//solo 7 bit di lunghezza, continuo se ho almeno un altro byte
+		if ( (next_byte + 1) < size ) ++next_byte;
+		else
+		{
+			if (status) *status = 1; 
+			//printf("Pacchetto WS non completo!\r\n");
+			return NULL;
+		}
+	}
+	else if (payload_len == 126)
+	{
+		//2 byte di dati
+		if ((next_byte + 2) < size)
+		{
+			//leggo altri 2 byte dal frame
+			total_payload_len = (data[++next_byte] << 0) + (data[++next_byte] << 8);
+		}
+		else
+		{
+			if (status) *status = 1; 
+			//printf("Pacchetto WS non completo!\r\n");
+			return NULL;
+		}
+
+	}
+	else if (payload_len == 127)
+	{
+		if ((next_byte + 8) < size)
+		{
+			//leggo altri 
+			total_payload_len = (data[++next_byte] << 0) + (data[++next_byte] << 8) + (data[++next_byte] << 16);
+			total_payload_len += (data[++next_byte] << 24) + (data[++next_byte] << 32) + (data[++next_byte] << 40);
+			total_payload_len += (data[++next_byte] << 48) + (data[++next_byte] << 56);
+		}
+		else
+		{
+			if (status) *status = 1; 
+			//printf("Pacchetto WS non completo!\r\n");
+			return NULL;
+		}
+	}
+
+	//fase mask, se il frame è masked devono esserci 4 byte di chiave
+	BYTE mask0 = 0;
+	BYTE mask1 = 0;
+	BYTE mask2 = 0;
+	BYTE mask3 = 0;
+
+	if (masked)
+	{
+		if ((next_byte + 4) < size)
+		{
+			//la maschera è composta da 4 bytes
+			mask0 = data[next_byte++];
+			mask1 = data[next_byte++];
+			mask2 = data[next_byte++];
+			mask3 = data[next_byte++];
+		}
+		else
+		{
+			if (status) *status = 1; 
+			//printf("Pacchetto WS non completo!\r\n");
+			return NULL;
+		}
+
+	}
+
+	//ok, creo un frame SOLO se ho tutti i dati del payload nel buffer
+	if ((next_byte + total_payload_len) <= size)
+	{
+		//frame valido!! posso costruire e copiare il payload
+		frame = new WebSocketFrame;
+		memset(frame, 0, sizeof(WebSocketFrame));
+
+		frame->OwnerTranceiver = this->mLocalTranceiver;
+
+		frame->Final = fin;
+		frame->Reserved1 = res1;
+		frame->Reserved2 = res2;
+		frame->Reserved3 = res3;
+		frame->OpCode = opcode;
+		frame->PayloadLength = payload_len;
+		frame->ExtendedPayloadLength = total_payload_len;
+		frame->Mask[0] = mask0;
+		frame->Mask[1] = mask1;
+		frame->Mask[2] = mask2;
+		frame->Mask[3] = mask3;
+		frame->IsMasked = masked;
+		frame->Payload = 0;
+		frame->FragmentIndex = 0;
+
+		//copio il payload e decodifico
+		frame->Payload = new unsigned char[total_payload_len + 1];
+		memset(frame->Payload, 0, total_payload_len + 1);
+
+		memcpy(frame->Payload, &data[next_byte], total_payload_len);
+
+		if (frame->IsMasked) WebSocketPayloadTransform(frame->Payload, frame->Mask, total_payload_len);
+		
+		if (status) *status = 0;
+		if (offset) *offset = (next_byte + total_payload_len);
+	}
+
+	return frame;
+
+}
+
+bool WebSocketClient::WSCParseMessage(WebSocketFrame *actual_frame, int residual)
 {
 	WebSocketTranceiver *tc = mLocalTranceiver;
 
@@ -671,7 +1041,8 @@ bool WebSocketClient::WSCParseMessage(WebSocketFrame *actual_frame)
 
 		tc->FragmentedTransferActive = !actual_frame->Final;
 
-		if (actual_frame->Final) PostAppMessage(mMessageWindow, WSC_RECEIVER_CLOSE_FRAGMENT, 0, 0);
+		if (actual_frame->Final) PostAppMessage(mMessageWindow, WSC_RECEIVER_CLOSE_FRAGMENT, 0, 0);	//ultimo frammento
+		else PostAppMessage(mMessageWindow, WSC_RECEIVER_NEXT_FRAGMENT, 0, 0); //frammento intermedio
 
 		return true;
 	}
@@ -682,11 +1053,11 @@ bool WebSocketClient::WSCParseMessage(WebSocketFrame *actual_frame)
 		//check se e' di controllo
 		if (actual_frame->IsControlFrame())
 		{
-			PostMessage(mMessageWindow, WSC_RECEIVER_CONTROL_MESSAGE, 0, (LPARAM)actual_frame);
+			PostMessage(mMessageWindow, WSC_RECEIVER_CONTROL_MESSAGE, (WPARAM)residual, (LPARAM)actual_frame);
 		}
 		else if (actual_frame->IsNonControlFrame())
 		{
-			PostMessage(mMessageWindow, WSC_RECEIVER_DATA_MESSAGE, 0, (LPARAM)actual_frame);
+			PostMessage(mMessageWindow, WSC_RECEIVER_DATA_MESSAGE, (WPARAM)residual, (LPARAM)actual_frame);
 		}
 	}
 

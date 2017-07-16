@@ -43,9 +43,10 @@
 #define WSC_RECEIVER_FAIL_CONNECTION		WEBSOCKETCLIENT_MESSAGE_BASE + 7
 #define WSC_RECEIVER_OPEN_FRAGMENT			WEBSOCKETCLIENT_MESSAGE_BASE + 8
 #define WSC_RECEIVER_CLOSE_FRAGMENT			WEBSOCKETCLIENT_MESSAGE_BASE + 9
+#define WSC_RECEIVER_NEXT_FRAGMENT			WEBSOCKETCLIENT_MESSAGE_BASE + 10
+#define WSC_RECEIVER_PUSH_DATA				WEBSOCKETCLIENT_MESSAGE_BASE + 11
 
-
-#define RECV_BUFFER_SIZE		50 * 1024
+#define RECV_BUFFER_SIZE		128
 
 enum WebSocketConnectionState { Opening = 0, Open, Closing, Closed };
 
@@ -81,7 +82,7 @@ struct WebSocketFrame
 
 	unsigned char Mask[4] = { 0, 0, 0, 0 };
 
-	unsigned char *Payload;
+	unsigned char *Payload;	//copia locale
 
 	WebSocketTranceiver *OwnerTranceiver;
 
@@ -114,7 +115,6 @@ struct WebSocketFrameElement
 	WebSocketFrameElement *NextFrame;
 };
 
-
 struct WebSocketHandshakeInfo
 {
 	char *WebSocketKey;
@@ -139,6 +139,9 @@ struct WebSocketTranceiver
 	SOCKET TranceiverSocket;
 	char LocalAddress[201];
 
+	char *DataBuffer;
+	int DataBuffer_Size;
+
 	WebSocketServer *WSServer;
 
 	WebSocketConnectionState ConnectionState;
@@ -149,6 +152,8 @@ struct WebSocketTranceiver
 	//lista pacchetti per framing
 	WebSocketFrameElement *FramedMessage;
 	bool FragmentedTransferActive;
+
+	bool mReceiverPause;
 };
 
 class WebSocketServer
@@ -196,11 +201,7 @@ public:
 	int WSSStartServer(int listen_port);
 	int WSSStopServer();
 
-
-
-
 };
-
 
 class WebSocketClient
 {
@@ -221,9 +222,10 @@ private:
 	int WSCDeleteTranceiver(WebSocketTranceiver *t);
 
 	WebSocketFrame *WSCDecodeFrame(char *data, int size);
-	bool WSCParseMessage(WebSocketFrame *actual_frame);
+	WebSocketFrame *WSCDecodeFrame(char *data, int size, int *offset, int *status);
+	bool WSCParseMessage(WebSocketFrame *actual_frame, int residual = 0);
 	bool WSCSendFrame(WebSocketFrame *frame);
-	bool WSCValidateHandshake(char *data, int len);
+	bool WSCValidateHandshake(char *data, int len, int *header_len = 0);
 
 	CRITICAL_SECTION	mReceiverLock;
 	CONDITION_VARIABLE	mReceiverCondition;
